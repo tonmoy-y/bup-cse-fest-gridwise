@@ -72,7 +72,10 @@ class GeminiProvider(LLMProvider):
             raise LLMProviderError(f"LLM request failed: {exc}") from exc
 
         if resp.status_code != 200:
-            raise LLMProviderError(f"LLM provider returned status {resp.status_code}")
+            snippet = resp.text[:300] if resp.text else ""
+            raise LLMProviderError(
+                f"LLM provider returned status {resp.status_code}: {snippet}"
+            )
 
         try:
             data = resp.json()

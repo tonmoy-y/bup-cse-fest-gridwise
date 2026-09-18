@@ -24,6 +24,15 @@ def health():
     return {"status": "ok"}
 
 
+def _redact(message: str) -> str:
+    """Strip anything that could resemble a key/token before it reaches a response."""
+    import re
+
+    message = re.sub(r"key=[^&\s\"]+", "key=REDACTED", message)
+    message = re.sub(r"AIza[0-9A-Za-z_\-]{20,}", "REDACTED", message)
+    return message[:400]
+
+
 def _build_plan_summary(interpretations, hourly) -> str:
     applied = [i for i in interpretations if i.applies]
     if not applied:
@@ -52,9 +61,13 @@ async def optimize_energy(request: Request):
         raw_interpretations = interpret_operator_notes(provider, req.operator_notes)
     except LLMProviderError as exc:
         logger.error("LLM provider failure: %s", exc)
+        reason = _redact(str(exc))
         return JSONResponse(
             status_code=500,
-            content={"error": "The interpretation service is temporarily unavailable"},
+            content={
+                "error": "The interpretation service is temporarily unavailable",
+                "reason": reason,
+            },
         )
     except Exception:
         logger.exception("Unexpected interpreter failure")
