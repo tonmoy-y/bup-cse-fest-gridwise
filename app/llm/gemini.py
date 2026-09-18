@@ -1,58 +1,26 @@
 import json
 import requests
 
-from app.llm.provider import LLMProvider, LLMProviderError
+from app.llm.provider import (
+    AuthenticationFailure,
+    LLMProvider,
+    LLMProviderError,
+    ModelNotFoundError,
+    RetryableProviderFailure,
+)
+from app.llm.schema import INTERPRETATION_RESPONSE_SCHEMA
 
 GEMINI_ENDPOINT_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
 
-RESPONSE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "interpretations": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "note_index": {"type": "integer"},
-                    "applies": {"type": "boolean"},
-                    "directive_type": {
-                        "type": "string",
-                        "enum": [
-                            "solar_reduction",
-                            "minimum_battery_reserve",
-                            "no_charge_window",
-                            "no_discharge_window",
-                            "max_grid_window",
-                            "no_op",
-                        ],
-                    },
-                    "hours": {"type": "array", "items": {"type": "integer"}},
-                    "value": {
-                        "type": "number",
-                        "description": (
-                            "The single numeric parameter for the chosen directive_type: "
-                            "the usable-fraction-remaining for solar_reduction, the kWh reserve "
-                            "level for minimum_battery_reserve, or the kWh grid cap for "
-                            "max_grid_window. Absent for no_charge_window, no_discharge_window, "
-                            "and no_op."
-                        ),
-                    },
-                    "explanation": {"type": "string"},
-                },
-                "required": ["note_index", "applies", "directive_type", "explanation"],
-            },
-        }
-    },
-    "required": ["interpretations"],
-}
-
 
 class GeminiProvider(LLMProvider):
+    name = "gemini"
+
     def __init__(self, api_key: str, model: str, timeout_seconds: float = 20.0):
         if not api_key:
-            raise LLMProviderError("GEMINI_API_KEY is not configured")
+            raise AuthenticationFailure("Gemini API key is not configured")
         self._api_key = api_key
         self._model = model
         self._timeout = timeout_seconds
@@ -68,7 +36,7 @@ class GeminiProvider(LLMProvider):
                 "topK": 1,
                 "seed": 7,
                 "responseMimeType": "application/json",
-                "responseSchema": RESPONSE_SCHEMA,
+                "responseSchema": INTERPRETATION_RESPONSE_SCHEMA,
             },
         }
         try:
@@ -78,19 +46,29 @@ class GeminiProvider(LLMProvider):
                 json=payload,
                 timeout=self._timeout,
             )
+        except requests.Timeout as exc:
+            raise RetryableProviderFailure(f"gemini request timed out: {exc}") from exc
         except requests.RequestException as exc:
-            raise LLMProviderError(f"LLM request failed: {exc}") from exc
+            raise RetryableProviderFailure(f"gemini request failed: {exc}") from exc
 
+        if resp.status_code in (401, 403):
+            raise AuthenticationFailure(f"gemini returned status {resp.status_code}: unauthorized")
+        if resp.status_code == 404:
+            raise ModelNotFoundError(f"gemini model '{self._model}' not found")
+        if resp.status_code == 429:
+            raise RetryableProviderFailure("gemini rate limit (429) exceeded")
+        if resp.status_code >= 500:
+            raise RetryableProviderFailure(f"gemini server error {resp.status_code}")
         if resp.status_code != 200:
             snippet = resp.text[:300] if resp.text else ""
-            raise LLMProviderError(
-                f"LLM provider returned status {resp.status_code}: {snippet}"
+            raise RetryableProviderFailure(
+                f"gemini returned status {resp.status_code}: {snippet}"
             )
 
         try:
             data = resp.json()
             text = data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, ValueError, json.JSONDecodeError) as exc:
-            raise LLMProviderError(f"Unexpected LLM response shape: {exc}") from exc
+            raise LLMProviderError(f"unexpected gemini response shape: {exc}") from exc
 
         return text

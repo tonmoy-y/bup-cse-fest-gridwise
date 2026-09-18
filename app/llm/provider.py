@@ -2,7 +2,23 @@ from abc import ABC, abstractmethod
 
 
 class LLMProviderError(Exception):
-    """Raised when the LLM provider fails to produce a usable response."""
+    """Base class for all LLM provider failures. Never includes secrets."""
+
+
+class RetryableProviderFailure(LLMProviderError):
+    """Transient failure (timeout, connection error, 429, 5xx). The same key
+    should not be retried immediately; move to the next candidate."""
+
+
+class AuthenticationFailure(LLMProviderError):
+    """Invalid/unauthorized/forbidden key. This key must never be retried
+    again within the request; move to the next key or provider."""
+
+
+class ModelNotFoundError(LLMProviderError):
+    """The configured model id is invalid or unavailable for this key. Try
+    the provider's configured fallback model before moving to the next
+    candidate."""
 
 
 class LLMProvider(ABC):

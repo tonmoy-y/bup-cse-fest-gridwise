@@ -34,6 +34,11 @@ class ValidatedInterpretation:
     directive_type: str
     structured_adjustment: dict | None
     explanation: str
+    was_downgraded: bool = False
+    """True when this entry required a safe guardrail fallback because the raw
+    LLM output for this note was missing, malformed, or semantically invalid.
+    Used by the failover manager to decide whether a provider's result counts
+    as a clean success or whether another candidate should be tried."""
 
 
 def _safe_no_op(note_index: int, explanation: str) -> ValidatedInterpretation:
@@ -43,18 +48,30 @@ def _safe_no_op(note_index: int, explanation: str) -> ValidatedInterpretation:
         directive_type="no_op",
         structured_adjustment=None,
         explanation=explanation,
+        was_downgraded=True,
     )
 
 
 def _validate_hours(hours) -> list[int] | None:
     if not isinstance(hours, list) or len(hours) == 0:
         return None
-    try:
-        int_hours = [int(h) for h in hours]
-    except (TypeError, ValueError):
-        return None
     if any(isinstance(h, bool) for h in hours):
         return None
+    int_hours = []
+    for h in hours:
+        if isinstance(h, int):
+            int_hours.append(h)
+        elif isinstance(h, float):
+            if not h.is_integer():
+                return None
+            int_hours.append(int(h))
+        elif isinstance(h, str):
+            try:
+                int_hours.append(int(h.strip()))
+            except ValueError:
+                return None
+        else:
+            return None
     if any(h < 0 or h > 23 for h in int_hours):
         return None
     if len(set(int_hours)) != len(int_hours):

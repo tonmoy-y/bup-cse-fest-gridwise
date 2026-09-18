@@ -1,13 +1,12 @@
+import json
 import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app.directives.interpreter import interpret_operator_notes
 from app.directives.normalizer import normalize_directives
-from app.directives.validator import validate_interpretations
-from app.llm.factory import get_llm_provider
+from app.llm.failover import run_interpretation
 from app.llm.provider import LLMProviderError
 from app.optimizer.solver import OptimizationError, solve_schedule
 from app.schemas import OptimizeRequest
@@ -51,18 +50,19 @@ async def optimize_energy(request: Request):
     try:
         req = OptimizeRequest.model_validate(body)
     except ValidationError as exc:
+        # exc.errors() embeds raw exception objects in "ctx" for custom validators,
+        # which JSONResponse cannot serialize; exc.errors(include_url=False) still
+        # contains them, so route through the safely-serialized json() form instead.
+        details = json.loads(exc.json())
         return JSONResponse(
             status_code=400,
-            content={"error": "Request does not match the required schema", "details": exc.errors()},
+            content={"error": "Request does not match the required schema", "details": details},
         )
 
     try:
-        provider = get_llm_provider()
-        raw_interpretations = interpret_operator_notes(
-            provider, req.operator_notes, req.battery.capacity_kwh
-        )
+        failover_result = run_interpretation(req.operator_notes, req.battery.capacity_kwh)
     except LLMProviderError as exc:
-        logger.error("LLM provider failure: %s", exc)
+        logger.error("All LLM providers failed: %s", exc)
         reason = _redact(str(exc))
         return JSONResponse(
             status_code=500,
@@ -75,7 +75,7 @@ async def optimize_energy(request: Request):
         logger.exception("Unexpected interpreter failure")
         return JSONResponse(status_code=500, content={"error": "Internal interpretation error"})
 
-    validated = validate_interpretations(raw_interpretations, req.operator_notes)
+    validated = failover_result.validated
     constraints = normalize_directives(validated, req.battery.minimum_energy_kwh)
 
     try:

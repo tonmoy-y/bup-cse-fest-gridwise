@@ -15,9 +15,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.directives.normalizer import normalize_directives
-from app.directives.validator import validate_interpretations
-from app.llm.factory import get_llm_provider
-from app.directives.interpreter import interpret_operator_notes
+from app.llm.failover import run_interpretation
 from app.optimizer.solver import solve_schedule
 from app.schemas import BatterySpec, HourEntry
 from app.validation.schedule_validator import validate_schedule
@@ -39,13 +37,12 @@ def run_case(case: dict) -> tuple[bool, str]:
     battery = BatterySpec(**input_data["battery"])
     operator_notes = input_data["operator_notes"]
 
-    provider = get_llm_provider()
     try:
-        raw = interpret_operator_notes(provider, operator_notes, battery.capacity_kwh)
+        failover_result = run_interpretation(operator_notes, battery.capacity_kwh)
     except Exception as exc:
         return False, f"LLM interpretation failed: {exc}"
 
-    validated = validate_interpretations(raw, operator_notes)
+    validated = failover_result.validated
 
     if len(validated) != len(operator_notes):
         return False, "Interpretation count mismatch"

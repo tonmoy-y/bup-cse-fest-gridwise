@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
 
-from app.llm import factory as llm_factory
+from app.llm import failover as llm_failover
 from app.llm.provider import LLMProvider
 
 
@@ -78,7 +78,7 @@ def test_health():
 
 
 def test_optimize_energy_happy_path(monkeypatch):
-    llm_factory._provider_instance = FakeProvider()
+    llm_failover._OVERRIDE_PROVIDER = FakeProvider()
     from app.main import app
 
     client = TestClient(app)
@@ -90,7 +90,7 @@ def test_optimize_energy_happy_path(monkeypatch):
     assert len(body["directive_interpretation"]) == len(payload["operator_notes"])
     assert len(body["hourly_plan"]) == 24
     assert body["total_grid_kwh"] > 0
-    llm_factory._provider_instance = None
+    llm_failover._OVERRIDE_PROVIDER = None
 
 
 def test_optimize_energy_malformed_json():

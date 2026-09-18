@@ -1,5 +1,5 @@
 from typing import List, Literal, Optional, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 DirectiveType = Literal[
     "solar_reduction",
@@ -14,18 +14,26 @@ BatteryAction = Literal["charge", "discharge", "idle"]
 
 
 class HourEntry(BaseModel):
-    hour: int
-    demand_kwh: float
-    solar_kwh: float
-    tariff_bdt_per_kwh: float
+    hour: int = Field(..., ge=0, le=23, strict=True)
+    demand_kwh: float = Field(..., ge=0, strict=True)
+    solar_kwh: float = Field(..., ge=0, strict=True)
+    tariff_bdt_per_kwh: float = Field(..., ge=0, strict=True)
 
 
 class BatterySpec(BaseModel):
-    capacity_kwh: float
-    initial_energy_kwh: float
-    minimum_energy_kwh: float
-    max_charge_kwh_per_hour: float
-    max_discharge_kwh_per_hour: float
+    capacity_kwh: float = Field(..., gt=0, strict=True)
+    initial_energy_kwh: float = Field(..., ge=0, strict=True)
+    minimum_energy_kwh: float = Field(..., ge=0, strict=True)
+    max_charge_kwh_per_hour: float = Field(..., ge=0, strict=True)
+    max_discharge_kwh_per_hour: float = Field(..., ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def validate_consistency(self) -> "BatterySpec":
+        if self.minimum_energy_kwh > self.capacity_kwh:
+            raise ValueError("minimum_energy_kwh cannot exceed capacity_kwh")
+        if self.initial_energy_kwh > self.capacity_kwh:
+            raise ValueError("initial_energy_kwh cannot exceed capacity_kwh")
+        return self
 
 
 class OptimizeRequest(BaseModel):

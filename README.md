@@ -30,9 +30,9 @@ operator notes, the service:
 
 ```
                  ┌───────────────────┐
- Energy Data +   │                   │
- Operator Notes ─▶   LLM Interpreter │  (Gemini — natural language → raw JSON directives)
-                 └─────────┬─────────┘
+ Energy Data +   │  LLM Interpreter  │  Gemini (primary) → Grok (fallback)
+ Operator Notes ─▶  + Failover       │  natural language → raw JSON directives,
+                 └─────────┬─────────┘  first candidate to pass guardrails wins
                            ▼
                  ┌───────────────────┐
                  │ Guardrail Validator│  (deterministic — schema, hours, ranges, applies-rules)
@@ -59,18 +59,36 @@ step is deterministic Python and independently checkable.
 
 ## 3. How the LLM is used
 
-- Provider: Google Gemini (`gemini-3.5-flash-lite` by default), called once per request with all
-  operator notes batched into a single prompt (minimizes latency/cost — never one call per note).
+- Primary provider: Google Gemini (`gemini-3.5-flash-lite` by default), called once per request
+  with all operator notes batched into a single prompt (minimizes latency/cost — never one call
+  per note). Optional secondary provider: xAI Grok, used only on Gemini failure/exhaustion.
 - The model receives a compact system prompt containing the six directive definitions, the
-  whole-hour time-window convention, and the `solar_reduction` factor convention. It does **not**
+  whole-hour time-window convention, and the `solar_reduction` factor convention, plus the
+  battery's `capacity_kwh` (needed to resolve percentage-based reserve notes). It does **not**
   receive the 24-hour demand/solar/tariff arrays — it only needs to understand the notes.
-- Structured output is requested via Gemini's `responseSchema` / `responseMimeType: application/json`
-  feature. If parsing fails, one compact correction retry is attempted. If that also fails, guardrails
-  safely fall back to `no_op` for the unparseable note(s) rather than crashing or inventing values.
+- Structured output is requested via each provider's JSON-schema-constrained mode (Gemini's
+  `responseSchema`, Grok's `response_format: json_schema`), sharing one canonical schema
+  (`app/llm/schema.py`) so both providers are held to the exact same shape. If parsing fails, one
+  compact correction retry is attempted. If that also fails, guardrails safely fall back to `no_op`
+  for the unparseable note(s) rather than crashing or inventing values.
+- **Multi-provider failover** (`app/llm/failover.py`): for each request, provider/key candidates
+  are tried in `LLM_PROVIDER_ORDER` (default `gemini,grok`), expanding each provider's key pool
+  (`GEMINI_API_KEYS` / `GROK_API_KEYS`, or the single `_API_KEY` form). A candidate only counts as
+  successful once its output passes the **same deterministic guardrails** described below with no
+  note needing a safe-fallback downgrade; the first such candidate wins and no further provider is
+  called. Failures are classified so the right thing happens automatically:
+  - **Auth failure** (401/403) → that key is never retried; move to the next key/provider.
+  - **Rate limit / timeout / 5xx** → move to the next candidate immediately (no same-key retry).
+  - **Model not found** (404) → retry the *same key* once with that provider's configured
+    `*_FALLBACK_MODEL`, then move on if still unavailable.
+  - **Malformed/invalid output** → guardrail-rejected, move to the next candidate.
+  Total attempts per request are capped by `LLM_MAX_ATTEMPTS` (default 4) — never unbounded, and
+  a normal successful request only ever makes **one** LLM call. If every candidate fails, the
+  service returns a controlled `500` (see §16) rather than fabricating a directive.
 - The LLM is fully isolated behind a small `LLMProvider` interface
-  (`app/llm/provider.py` → `app/llm/gemini.py`), so swapping to another provider/model is a
-  configuration change, not a rewrite (`app/llm/factory.py` selects the provider from
-  `LLM_PROVIDER`).
+  (`app/llm/provider.py` → `app/llm/gemini.py` / `app/llm/grok.py`); the interpreter, guardrails,
+  optimizer, and API layer depend only on that interface and never on a vendor SDK, so adding a
+  third provider is a new ~70-line adapter file plus a config entry, not a rewrite.
 
 ## 4. Supported directives
 
@@ -134,13 +152,24 @@ pip install -r requirements.txt
 
 ## 9. Environment variables
 
-| Variable          | Required | Default                  | Purpose                          |
-|--------------------|----------|---------------------------|-----------------------------------|
-| `GEMINI_API_KEY`   | Yes      | —                          | Gemini API key for interpretation |
-| `GEMINI_MODEL`     | No       | `gemini-3.5-flash-lite`    | Gemini model id                   |
-| `LLM_PROVIDER`     | No       | `gemini`                   | Provider selector (extensible)    |
+| Variable                 | Required | Default                       | Purpose                                          |
+|---------------------------|----------|---------------------------------|----------------------------------------------------|
+| `LLM_PROVIDER_ORDER`      | No       | `gemini,grok`                    | Failover priority order (providers with no key configured are skipped) |
+| `GEMINI_API_KEY`          | Yes*     | —                                | Single Gemini key                                  |
+| `GEMINI_API_KEYS`         | No       | —                                | Comma-separated Gemini key pool (merged with the above) |
+| `GEMINI_MODEL`            | No       | `gemini-3.5-flash-lite`          | Gemini model id                                    |
+| `GEMINI_FALLBACK_MODEL`   | No       | `gemini-2.0-flash`               | Used if the primary Gemini model id 404s            |
+| `GROK_API_KEY`            | No       | —                                | Single Grok (xAI) key                              |
+| `GROK_API_KEYS`           | No       | —                                | Comma-separated Grok key pool                      |
+| `GROK_MODEL`              | No       | `grok-4-fast-non-reasoning`      | Grok model id                                      |
+| `GROK_FALLBACK_MODEL`     | No       | `grok-3-mini`                    | Used if the primary Grok model id 404s              |
+| `LLM_TIMEOUT_SECONDS`     | No       | `20`                             | Per-call HTTP timeout                              |
+| `LLM_MAX_ATTEMPTS`        | No       | `4`                              | Hard cap on total LLM attempts per request          |
 
-Copy `.env.example` to `.env` and fill in `GEMINI_API_KEY` (never commit real keys).
+*At least one provider needs at least one key configured; Gemini-only is a fully valid setup for
+local development, Grok is purely an optional resilience layer.
+
+Copy `.env.example` to `.env` and fill in your key(s) (never commit real keys).
 
 ## 10. Gemini API setup
 
@@ -269,20 +298,27 @@ contains no baked-in secrets.
 - `pydantic` — request/response schema validation
 - `scipy` — `linprog` (HiGHS) LP solver for the optimizer
 - `numpy` — LP matrix construction
-- `requests` — Gemini REST API calls
+- `requests` — Gemini and Grok REST API calls
 
 ## 19. Known limitations
 
 - The optimizer models the battery as lossless (no round-trip efficiency loss), matching the
   energy-balance equation given in the Problem Statement (§09) — this is not an approximation
   relative to the spec, but would need extension for a more realistic non-ideal battery.
-- The LLM call is a runtime dependency: if the configured provider is unreachable, the service
-  returns a controlled `500` (per Section 08 "safe failure") rather than an approximate answer.
-  A local/backup model can be substituted by implementing the `LLMProvider` interface.
+- The LLM call is a runtime dependency: if every configured provider/key candidate is unreachable
+  or exhausted, the service returns a controlled `500` (per Section 08 "safe failure") rather than
+  an approximate answer. A third provider can be added by implementing the `LLMProvider` interface
+  and registering it in `app/llm/failover.py`'s `PROVIDER_CLASSES`.
+- Gemini's per-project rate limits are not bypassed by rotating Gemini keys alone (Google enforces
+  quota mostly per-project); the Grok fallback exists specifically to survive a Gemini-side outage
+  or quota exhaustion, not to multiply Gemini throughput.
+- The Grok adapter's strict JSON-schema mode was implemented against xAI's documented
+  OpenAI-compatible API shape but has not been exercised against a live Grok account/key in this
+  environment; the guardrail layer downstream would still safely reject any malformed Grok output
+  either way.
 - `minimum_battery_reserve` given as a percentage of capacity is resolved by the LLM using the
-  wording in the note itself (the LLM is never shown the battery spec numbers, per the
-  low-token-usage requirement); percentage phrasing referring to an unstated capacity number
-  cannot be resolved to an absolute kWh value and will be treated conservatively.
+  battery's `capacity_kwh` passed alongside the notes (never the full 24-hour scenario, per the
+  low-token-usage requirement).
 
 ## 20. Security notes
 
@@ -298,7 +334,9 @@ contains no baked-in secrets.
 - [FastAPI](https://fastapi.tiangolo.com/), [Pydantic](https://docs.pydantic.dev/), [SciPy](https://scipy.org/)
   (HiGHS LP solver), [NumPy](https://numpy.org/), [Requests](https://requests.readthedocs.io/) —
   open-source libraries used as-is under their respective licenses.
-- [Google Gemini API](https://ai.google.dev/) — hosted language model used for operator-note
-  interpretation.
+- [Google Gemini API](https://ai.google.dev/) — primary hosted language model used for
+  operator-note interpretation.
+- [xAI Grok API](https://x.ai/) — optional secondary/fallback language model, used only if Gemini
+  is unconfigured or every Gemini candidate fails for a given request.
 - Core architecture, guardrails, optimizer formulation, and validators are original work for this
   submission.
