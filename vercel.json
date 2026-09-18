@@ -1,7 +1,9 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/index.py", "use": "@vercel/python" }
+    { "src": "api/index.py", "use": "@vercel/python" },
+    { "src": "static/**", "use": "@vercel/static" },
+    { "src": "public_samples/**", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/", "dest": "/static/index.html" },
