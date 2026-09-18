@@ -4,6 +4,8 @@
     { "src": "api/index.py", "use": "@vercel/python" }
   ],
   "routes": [
+    { "src": "/", "dest": "/static/index.html" },
+    { "src": "/public_samples/(.*)", "dest": "/public_samples/$1" },
     { "src": "/health", "dest": "api/index.py" },
     { "src": "/optimize-energy", "dest": "api/index.py" },
     { "src": "/(.*)", "dest": "api/index.py" }
