@@ -6,6 +6,8 @@ notes with a real language model, deterministically validates and normalizes the
 directives, and computes a mathematically optimal, guardrail-verified 24-hour grid/solar/battery
 schedule.
 
+**Live Deployment URL:** [https://gridwise.tonmoyy.dev/](https://gridwise.tonmoyy.dev/)
+
 ## 1. Overview
 
 ```
@@ -145,6 +147,8 @@ API returns a controlled `500` rather than an incorrect schedule.
 ## 8. Local setup
 
 ```bash
+git clone https://github.com/tonmoy-y/bup-cse-fest-gridwise.git
+cd bup-cse-fest-gridwise
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -227,30 +231,7 @@ python tests/test_guardrails.py
 python tests/test_api.py   # uses a fake in-process LLM provider, no network/API key needed
 ```
 
-## 15. Vercel deployment
-
-This repo is structured for Vercel's Python runtime: `api/index.py` exports the FastAPI `app`
-object directly (ASGI), and `vercel.json` routes all traffic to it.
-
-```bash
-npm i -g vercel   # if not already installed
-vercel login
-vercel link
-vercel env add GEMINI_API_KEY
-vercel env add GEMINI_MODEL   # optional
-vercel --prod
-```
-
-After deployment, verify:
-
-```bash
-curl https://<your-deployment>.vercel.app/health
-```
-
-No local filesystem persistence, background workers, or databases are used, so cold starts are
-fast and the deployment is stateless.
-
-## 16. Docker build/run (fallback)
+## 15. Docker build/run (fallback)
 
 ```bash
 docker build -t gridwise-llm .
@@ -261,7 +242,7 @@ curl http://localhost:8000/health
 The image binds to `0.0.0.0:8000`, takes all configuration via environment variables, and
 contains no baked-in secrets.
 
-## 17. Example response
+## 16. Example response
 
 ```json
 {
@@ -292,7 +273,7 @@ contains no baked-in secrets.
 }
 ```
 
-## 18. Dependencies
+## 17. Dependencies
 
 - `fastapi`, `uvicorn` — HTTP API and ASGI server
 - `pydantic` — request/response schema validation
@@ -300,7 +281,7 @@ contains no baked-in secrets.
 - `numpy` — LP matrix construction
 - `requests` — Gemini and Grok REST API calls
 
-## 19. Known limitations
+## 18. Known limitations
 
 - The optimizer models the battery as lossless (no round-trip efficiency loss), matching the
   energy-balance equation given in the Problem Statement (§09) — this is not an approximation
@@ -320,7 +301,7 @@ contains no baked-in secrets.
   battery's `capacity_kwh` passed alongside the notes (never the full 24-hour scenario, per the
   low-token-usage requirement).
 
-## 20. Security notes
+## 19. Security notes
 
 - No API keys, tokens, or secrets are committed to this repository (see `.gitignore`).
 - `.env.example` documents required variable names only, with no real values.
@@ -329,7 +310,7 @@ contains no baked-in secrets.
 - The Docker image takes all secrets via environment variables at runtime; none are baked into
   the image layers.
 
-## 21. Attribution / credits
+## 20. Attribution / credits
 
 - [FastAPI](https://fastapi.tiangolo.com/), [Pydantic](https://docs.pydantic.dev/), [SciPy](https://scipy.org/)
   (HiGHS LP solver), [NumPy](https://numpy.org/), [Requests](https://requests.readthedocs.io/) —

@@ -143,6 +143,12 @@ def interpret_operator_notes(
             '"interpretations" array shape described in the system instructions, with no '
             "extra text."
         )
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining < 2.0:
+                raise LLMProviderError("LLM output invalid and no time left for a correction retry")
+            if hasattr(provider, "_timeout"):
+                provider._timeout = min(provider._timeout, remaining)
         try:
             raw_retry = provider.generate_json(SYSTEM_PROMPT, correction_prompt)
             parsed_retry = _extract_json(raw_retry)
