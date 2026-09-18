@@ -41,7 +41,7 @@ def run_case(case: dict) -> tuple[bool, str]:
 
     provider = get_llm_provider()
     try:
-        raw = interpret_operator_notes(provider, operator_notes)
+        raw = interpret_operator_notes(provider, operator_notes, battery.capacity_kwh)
     except Exception as exc:
         return False, f"LLM interpretation failed: {exc}"
 

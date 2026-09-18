@@ -29,9 +29,16 @@ RESPONSE_SCHEMA = {
                         ],
                     },
                     "hours": {"type": "array", "items": {"type": "integer"}},
-                    "factor": {"type": "number"},
-                    "minimum_energy_kwh": {"type": "number"},
-                    "max_grid_kwh": {"type": "number"},
+                    "value": {
+                        "type": "number",
+                        "description": (
+                            "The single numeric parameter for the chosen directive_type: "
+                            "the usable-fraction-remaining for solar_reduction, the kWh reserve "
+                            "level for minimum_battery_reserve, or the kWh grid cap for "
+                            "max_grid_window. Absent for no_charge_window, no_discharge_window, "
+                            "and no_op."
+                        ),
+                    },
                     "explanation": {"type": "string"},
                 },
                 "required": ["note_index", "applies", "directive_type", "explanation"],
@@ -57,6 +64,9 @@ class GeminiProvider(LLMProvider):
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
             "generationConfig": {
                 "temperature": 0,
+                "topP": 0,
+                "topK": 1,
+                "seed": 7,
                 "responseMimeType": "application/json",
                 "responseSchema": RESPONSE_SCHEMA,
             },

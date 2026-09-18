@@ -58,7 +58,9 @@ async def optimize_energy(request: Request):
 
     try:
         provider = get_llm_provider()
-        raw_interpretations = interpret_operator_notes(provider, req.operator_notes)
+        raw_interpretations = interpret_operator_notes(
+            provider, req.operator_notes, req.battery.capacity_kwh
+        )
     except LLMProviderError as exc:
         logger.error("LLM provider failure: %s", exc)
         reason = _redact(str(exc))

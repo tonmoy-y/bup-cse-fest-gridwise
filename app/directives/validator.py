@@ -65,7 +65,14 @@ def _validate_hours(hours) -> list[int] | None:
 
 
 def _validate_number(value, minimum=None, maximum=None) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value.strip().rstrip("%"))
+        except ValueError:
+            return None
+    if not isinstance(value, (int, float)):
         return None
     val = float(value)
     if val != val or val in (float("inf"), float("-inf")):
