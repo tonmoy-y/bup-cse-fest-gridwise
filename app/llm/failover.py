@@ -12,6 +12,7 @@ parseable) becomes a controlled error.
 """
 
 import logging
+import time
 from dataclasses import dataclass
 
 from app import config
@@ -91,28 +92,45 @@ def build_candidates() -> list[Candidate]:
     return candidates
 
 
+MIN_CALL_SECONDS = 1.0
+
+
 def _is_clean(raw: list, validated: list[ValidatedInterpretation], expected_count: int) -> bool:
     if not isinstance(raw, list) or len(raw) != expected_count:
+        return False
+    indices = [e.get("note_index") if isinstance(e, dict) else None for e in raw]
+    if sorted(i for i in indices if isinstance(i, int) and not isinstance(i, bool)) != list(
+        range(expected_count)
+    ):
         return False
     return not any(v.was_downgraded for v in validated)
 
 
 def _try_candidate(
-    candidate: Candidate, operator_notes: list[str], battery_capacity_kwh: float, model: str
+    candidate: Candidate,
+    operator_notes: list[str],
+    battery_capacity_kwh: float,
+    model: str,
+    deadline: float,
 ) -> tuple[list, list[ValidatedInterpretation]]:
+    remaining = deadline - time.monotonic()
+    if remaining < MIN_CALL_SECONDS:
+        raise RetryableProviderFailure("interpretation time budget exhausted")
     provider_cls = PROVIDER_CLASSES[candidate.provider_name]
     provider = provider_cls(
-        api_key=candidate.api_key, model=model, timeout_seconds=config.LLM_TIMEOUT_SECONDS
+        api_key=candidate.api_key,
+        model=model,
+        timeout_seconds=min(config.LLM_TIMEOUT_SECONDS, remaining),
     )
-    raw = interpret_operator_notes(provider, operator_notes, battery_capacity_kwh)
-    validated = validate_interpretations(raw, operator_notes)
+    raw = interpret_operator_notes(provider, operator_notes, battery_capacity_kwh, deadline=deadline)
+    validated = validate_interpretations(raw, operator_notes, battery_capacity_kwh)
     return raw, validated
 
 
 def run_interpretation(operator_notes: list[str], battery_capacity_kwh: float) -> FailoverResult:
     if _OVERRIDE_PROVIDER is not None:
         raw = interpret_operator_notes(_OVERRIDE_PROVIDER, operator_notes, battery_capacity_kwh)
-        validated = validate_interpretations(raw, operator_notes)
+        validated = validate_interpretations(raw, operator_notes, battery_capacity_kwh)
         return FailoverResult(
             validated=validated,
             provider_used="override",
@@ -130,9 +148,12 @@ def run_interpretation(operator_notes: list[str], battery_capacity_kwh: float) -
     best: FailoverResult | None = None
     attempts = 0
     max_attempts = max(1, config.LLM_MAX_ATTEMPTS)
+    # Hard wall-clock budget for all LLM work so the request stays well inside
+    # the judge's 30 s per-request ceiling, however many candidates exist.
+    deadline = time.monotonic() + config.LLM_TOTAL_BUDGET_SECONDS
 
     for candidate in candidates:
-        if attempts >= max_attempts:
+        if attempts >= max_attempts or deadline - time.monotonic() < MIN_CALL_SECONDS:
             break
 
         model = candidate.model
@@ -140,7 +161,9 @@ def run_interpretation(operator_notes: list[str], battery_capacity_kwh: float) -
         while True:
             attempts += 1
             try:
-                raw, validated = _try_candidate(candidate, operator_notes, battery_capacity_kwh, model)
+                raw, validated = _try_candidate(
+                    candidate, operator_notes, battery_capacity_kwh, model, deadline
+                )
             except AuthenticationFailure as exc:
                 logger.warning(
                     "provider=%s key_index=%d auth failure, moving to next candidate",

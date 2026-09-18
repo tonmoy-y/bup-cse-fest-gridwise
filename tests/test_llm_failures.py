@@ -130,7 +130,10 @@ def test_duplicate_note_index():
         notes=("note a",),
     )
     assert len(result) == 1
-    assert result[0].explanation == "first"
+    # Conflicting mappings for the same note must never reach the optimizer.
+    assert result[0].directive_type == "no_op"
+    assert result[0].structured_adjustment is None
+    assert result[0].was_downgraded is True
 
 
 def test_missing_one_note_defaults_to_no_op():

@@ -1,5 +1,5 @@
 from typing import List, Literal, Optional, Union
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DirectiveType = Literal[
     "solar_reduction",
@@ -14,6 +14,8 @@ BatteryAction = Literal["charge", "discharge", "idle"]
 
 
 class HourEntry(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     hour: int = Field(..., ge=0, le=23, strict=True)
     demand_kwh: float = Field(..., ge=0, strict=True)
     solar_kwh: float = Field(..., ge=0, strict=True)
@@ -21,7 +23,9 @@ class HourEntry(BaseModel):
 
 
 class BatterySpec(BaseModel):
-    capacity_kwh: float = Field(..., gt=0, strict=True)
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    capacity_kwh: float = Field(..., ge=0, strict=True)
     initial_energy_kwh: float = Field(..., ge=0, strict=True)
     minimum_energy_kwh: float = Field(..., ge=0, strict=True)
     max_charge_kwh_per_hour: float = Field(..., ge=0, strict=True)

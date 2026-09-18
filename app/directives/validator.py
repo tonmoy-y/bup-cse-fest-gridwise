@@ -102,11 +102,18 @@ def _validate_number(value, minimum=None, maximum=None) -> float | None:
 
 
 def validate_interpretations(
-    raw_interpretations: list[dict], operator_notes: list[str]
+    raw_interpretations: list[dict],
+    operator_notes: list[str],
+    battery_capacity_kwh: float | None = None,
 ) -> list[ValidatedInterpretation]:
-    """Validate raw LLM entries against operator_notes, returning one safe entry per note."""
+    """Validate raw LLM entries against operator_notes, returning one safe entry per note.
+
+    When battery_capacity_kwh is given, a minimum_battery_reserve above the
+    battery capacity is rejected (Problem Statement Section 08).
+    """
     n = len(operator_notes)
     by_index: dict[int, dict] = {}
+    duplicated: set[int] = set()
 
     for entry in raw_interpretations:
         if not isinstance(entry, dict):
@@ -116,12 +123,18 @@ def validate_interpretations(
             continue
         if idx < 0 or idx >= n:
             continue
-        if idx not in by_index:
+        if idx in by_index:
+            duplicated.add(idx)
+        else:
             by_index[idx] = entry
 
     results: list[ValidatedInterpretation] = []
     for i in range(n):
         entry = by_index.get(i)
+        if i in duplicated:
+            # Conflicting mappings for one note: neither can be trusted.
+            results.append(_safe_no_op(i, "Duplicate interpretations for this note; downgraded."))
+            continue
         if entry is None:
             results.append(_safe_no_op(i, "No valid interpretation was produced for this note."))
             continue
@@ -165,7 +178,9 @@ def validate_interpretations(
             adjustment = {"hours": hours, "factor": factor}
 
         elif directive_type == "minimum_battery_reserve":
-            min_energy = _validate_number(entry.get("minimum_energy_kwh"), minimum=0.0)
+            min_energy = _validate_number(
+                entry.get("minimum_energy_kwh"), minimum=0.0, maximum=battery_capacity_kwh
+            )
             if min_energy is None:
                 results.append(_safe_no_op(i, "Invalid minimum_energy_kwh; downgraded."))
                 continue

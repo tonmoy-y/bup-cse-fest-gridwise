@@ -40,7 +40,7 @@ class GrokProvider(LLMProvider):
                 "json_schema": {
                     "name": "gridwise_interpretations",
                     "schema": INTERPRETATION_RESPONSE_SCHEMA,
-                    "strict": True,
+                    "strict": False,
                 },
             },
         }

@@ -1,5 +1,6 @@
 import json
 import re
+import time
 
 from app.llm.provider import LLMProvider, LLMProviderError
 
@@ -115,7 +116,10 @@ def _expand_value_field(entry: dict) -> dict:
 
 
 def interpret_operator_notes(
-    provider: LLMProvider, operator_notes: list[str], battery_capacity_kwh: float
+    provider: LLMProvider,
+    operator_notes: list[str],
+    battery_capacity_kwh: float,
+    deadline: float | None = None,
 ) -> list[dict]:
     """Call the LLM once to interpret all notes; retry once with a correction prompt on failure."""
     user_prompt = _build_user_prompt(operator_notes, battery_capacity_kwh)
@@ -128,6 +132,10 @@ def interpret_operator_notes(
             raise ValueError("interpretations must be a list")
         return [_expand_value_field(e) for e in interpretations]
     except (ValueError, KeyError, TypeError) as first_error:
+        if deadline is not None and deadline - time.monotonic() < 2.0:
+            raise LLMProviderError(
+                f"LLM output invalid and no time left for a correction retry: {first_error}"
+            ) from first_error
         correction_prompt = (
             user_prompt
             + "\n\nYour previous response could not be parsed as the required JSON object "

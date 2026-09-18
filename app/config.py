@@ -25,7 +25,9 @@ GROK_FALLBACK_MODEL = os.environ.get("GROK_FALLBACK_MODEL", "grok-3-mini")
 LLM_PROVIDER_ORDER = [
     p.strip() for p in os.environ.get("LLM_PROVIDER_ORDER", "gemini,grok").split(",") if p.strip()
 ]
-LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "20"))
+LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "12"))
+# Total wall-clock budget for all LLM calls (all providers/keys/retries) in one request.
+LLM_TOTAL_BUDGET_SECONDS = float(os.environ.get("LLM_TOTAL_BUDGET_SECONDS", "24"))
 LLM_MAX_ATTEMPTS = int(os.environ.get("LLM_MAX_ATTEMPTS", "4"))
 REQUEST_TIMEOUT_SECONDS = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "28"))
 

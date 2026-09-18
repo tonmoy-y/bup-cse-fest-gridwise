@@ -25,7 +25,7 @@ def test_no_secrets_in_tracked_git_files():
     tracked = result.stdout.splitlines()
     assert ".env" not in tracked, ".env must never be committed"
 
-    forbidden_patterns = ["AIzaSy", "BEGIN RSA PRIVATE KEY", "BEGIN PRIVATE KEY"]
+    forbidden_patterns = ["AIza" + "Sy", "BEGIN RSA " + "PRIVATE KEY", "BEGIN " + "PRIVATE KEY", "xai-" + "AAAA"]
     for path in tracked:
         full = os.path.join(REPO_ROOT, path)
         if not os.path.isfile(full):
@@ -80,7 +80,7 @@ def test_missing_api_key_error_has_no_key_leak():
 
     class BrokenProvider(LLMProvider):
         def generate_json(self, system_prompt, user_prompt):
-            raise LLMProviderError("LLM provider returned status 403: key=AIzaSyFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE forbidden")
+            raise LLMProviderError("LLM provider returned status 403: key=" + "AIza" + "Sy" + "FAKE" * 8 + " forbidden")
 
     llm_failover._OVERRIDE_PROVIDER = BrokenProvider()
     try:
@@ -90,7 +90,7 @@ def test_missing_api_key_error_has_no_key_leak():
         resp = client.post("/optimize-energy", json=payload)
         assert resp.status_code == 500
         text = resp.text
-        assert "AIzaSy" not in text, "raw API key leaked into error response"
+        assert "AIza" + "Sy" not in text, "raw API key leaked into error response"
         assert "traceback" not in text.lower()
     finally:
         llm_failover._OVERRIDE_PROVIDER = None

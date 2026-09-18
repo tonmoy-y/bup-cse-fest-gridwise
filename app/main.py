@@ -2,7 +2,9 @@ import json
 import logging
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+import os
+
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
 from app.directives.normalizer import normalize_directives
@@ -16,6 +18,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("gridwise")
 
 app = FastAPI(title="GridWise LLM-Assisted Energy Optimization API")
+
+
+_INDEX_HTML = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "index.html")
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    # Same demo page Vercel serves statically; lets Docker/local runs show it too.
+    if os.path.isfile(_INDEX_HTML):
+        return FileResponse(_INDEX_HTML, media_type="text/html")
+    return JSONResponse({"status": "ok", "endpoints": ["GET /health", "POST /optimize-energy"]})
 
 
 @app.get("/health")
@@ -32,6 +45,10 @@ def _redact(message: str) -> str:
     return message[:400]
 
 
+def _reject_constant(token: str):
+    raise ValueError(f"non-finite JSON number {token!r} is not allowed")
+
+
 def _build_plan_summary(interpretations, hourly) -> str:
     applied = [i for i in interpretations if i.applies]
     if not applied:
@@ -43,7 +60,9 @@ def _build_plan_summary(interpretations, hourly) -> str:
 @app.post("/optimize-energy")
 async def optimize_energy(request: Request):
     try:
-        body = await request.json()
+        raw_body = await request.body()
+        # Reject the non-standard NaN / Infinity tokens Python's json accepts.
+        body = json.loads(raw_body, parse_constant=_reject_constant)
     except Exception:
         return JSONResponse(status_code=400, content={"error": "Malformed JSON body"})
 
@@ -82,7 +101,10 @@ async def optimize_energy(request: Request):
         result = solve_schedule(req.hours, req.battery, constraints)
     except OptimizationError as exc:
         logger.error("Optimization failure: %s", exc)
-        return JSONResponse(status_code=500, content={"error": "No feasible schedule could be computed"})
+        return JSONResponse(
+            status_code=422,
+            content={"error": "No feasible schedule satisfies the scenario and interpreted directives"},
+        )
     except Exception:
         logger.exception("Unexpected optimizer failure")
         return JSONResponse(status_code=500, content={"error": "Internal optimization error"})

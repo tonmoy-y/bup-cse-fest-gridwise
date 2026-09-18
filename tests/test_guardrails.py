@@ -51,14 +51,17 @@ def test_valid_solar_reduction_passes():
     assert result[0].structured_adjustment == {"hours": [13, 14], "factor": 0.2}
 
 
-def test_duplicate_note_index_uses_first():
+def test_duplicate_note_index_is_rejected():
     notes = ["note a"]
     raw = [
         {"note_index": 0, "applies": True, "directive_type": "no_charge_window", "hours": [1], "explanation": "first"},
         {"note_index": 0, "applies": False, "directive_type": "no_op", "explanation": "second"},
     ]
     result = validate_interpretations(raw, notes)
-    assert result[0].explanation == "first"
+    # Conflicting mappings for the same note must never reach the optimizer.
+    assert result[0].directive_type == "no_op"
+    assert result[0].structured_adjustment is None
+    assert result[0].was_downgraded is True
 
 
 def test_no_op_requires_applies_false():
@@ -74,3 +77,28 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print(f"PASS {name}")
+
+
+def test_reserve_above_capacity_rejected():
+    raw = [{"note_index": 0, "applies": True, "directive_type": "minimum_battery_reserve",
+            "hours": [18], "minimum_energy_kwh": 501, "explanation": "x"}]
+    result = validate_interpretations(raw, ["keep reserve"], 500.0)
+    assert result[0].directive_type == "no_op" and result[0].was_downgraded
+
+
+def test_reserve_equal_capacity_accepted():
+    raw = [{"note_index": 0, "applies": True, "directive_type": "minimum_battery_reserve",
+            "hours": [18], "minimum_energy_kwh": 500, "explanation": "x"}]
+    result = validate_interpretations(raw, ["keep reserve"], 500.0)
+    assert result[0].structured_adjustment == {"hours": [18], "minimum_energy_kwh": 500.0}
+
+
+def test_duplicate_index_in_multi_note_output_only_downgrades_that_note():
+    raw = [
+        {"note_index": 0, "applies": True, "directive_type": "no_charge_window", "hours": [1], "explanation": "a"},
+        {"note_index": 1, "applies": False, "directive_type": "no_op", "explanation": "b"},
+        {"note_index": 1, "applies": True, "directive_type": "no_discharge_window", "hours": [2], "explanation": "c"},
+    ]
+    result = validate_interpretations(raw, ["n0", "n1"])
+    assert result[0].directive_type == "no_charge_window"
+    assert result[1].directive_type == "no_op" and result[1].was_downgraded
