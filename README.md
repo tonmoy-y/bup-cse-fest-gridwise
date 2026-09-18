@@ -59,7 +59,7 @@ step is deterministic Python and independently checkable.
 
 ## 3. How the LLM is used
 
-- Provider: Google Gemini (`gemini-2.5-flash-lite` by default), called once per request with all
+- Provider: Google Gemini (`gemini-3.5-flash-lite` by default), called once per request with all
   operator notes batched into a single prompt (minimizes latency/cost — never one call per note).
 - The model receives a compact system prompt containing the six directive definitions, the
   whole-hour time-window convention, and the `solar_reduction` factor convention. It does **not**
@@ -137,7 +137,7 @@ pip install -r requirements.txt
 | Variable          | Required | Default                  | Purpose                          |
 |--------------------|----------|---------------------------|-----------------------------------|
 | `GEMINI_API_KEY`   | Yes      | —                          | Gemini API key for interpretation |
-| `GEMINI_MODEL`     | No       | `gemini-2.5-flash-lite`    | Gemini model id                   |
+| `GEMINI_MODEL`     | No       | `gemini-3.5-flash-lite`    | Gemini model id                   |
 | `LLM_PROVIDER`     | No       | `gemini`                   | Provider selector (extensible)    |
 
 Copy `.env.example` to `.env` and fill in `GEMINI_API_KEY` (never commit real keys).
